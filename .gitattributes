@@ -1,0 +1,7 @@
+# 二进制文件不做换行符转换（本仓库不使用 LFS）
+*.png -text
+*.jpg -text
+*.ico -text
+*.jar -text
+*.keystore -text
+*.pbxproj -text
