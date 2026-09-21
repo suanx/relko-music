@@ -1,16 +1,8 @@
 name: Build Unsigned iOS IPA
 
-# 触发条件：
-#   1. 推送到 master 或 main 分支时自动构建（满足你的需求）
-#   2. 推送 v* 标签时构建并自动发布 GitHub Release
-#   3. 也可在 Actions 页面手动触发 (workflow_dispatch)
+# 触发条件：仅手动触发 (workflow_dispatch)。
+# Android 构建发布已迁移到 android-build.yml；iOS 未签名 IPA 需要时在此手动触发。
 on:
-  push:
-    branches:
-      - master
-      - main
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 # 创建 Release 需要写权限；删除旧的 workflow run 需要 actions 写权限
