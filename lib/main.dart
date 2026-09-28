@@ -26,6 +26,8 @@ import 'ui/widgets/toast.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppConfig.loadCustomBaseUrl();
+  // 加载真实版本号（来自 pubspec.yaml），保证检查更新比较正确。
+  await AppConfig.loadAppVersion();
 
   final client = ApiClient();
   final api = MusicApi(client);

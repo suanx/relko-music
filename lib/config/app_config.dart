@@ -1,11 +1,33 @@
-﻿import 'package:shared_preferences/shared_preferences.dart';
+﻿import 'package:package_info_plus/package_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AppConfig {
   const AppConfig._();
 
   static const appName = 'REIKO';
-  static const appVersion = '3.1.0';
-  static const appVersionCode = '310';
+
+  /// 兜底版本号：仅在 PackageInfo 读取失败时使用。
+  /// 正常情况下以 pubspec.yaml 的 version 为唯一数据源，发布时无需改这里。
+  static const _fallbackVersion = '3.1.0';
+
+  /// 应用版本号与版本码（启动时从 PackageInfo 加载，见 [loadAppVersion]）。
+  /// 版本码为版本号去点后的数字串（如 3.1.1 -> 311），供检查更新比较。
+  static String appVersion = _fallbackVersion;
+  static String appVersionCode = _fallbackVersion;
+
+  /// 从系统 PackageInfo 加载真实版本号（来自 pubspec.yaml 的 version）。
+  /// 必须在 main() 中于 runApp 之前 await 调用，保证检查更新拿到正确版本。
+  static Future<void> loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (info.version.trim().isNotEmpty) {
+        appVersion = info.version.trim();
+        appVersionCode = info.version.trim();
+      }
+    } catch (_) {
+      // 读取失败时保留兜底常量，不影响应用启动。
+    }
+  }
 
   static const _defaultApiBaseUrl = 'https://music.api.hoilai.cn';
   static const _customBaseUrlKey = 'settings.custom_api_base_url';
