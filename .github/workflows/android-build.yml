@@ -169,16 +169,27 @@ jobs:
               forceUpdate:$forceUpdate, releaseDate:$releaseDate, sha256:$sha256}' > latest.json
           cat latest.json
 
-      # 先传 APK 再传清单：任何时刻 latest.json 指向的安装包都一定已存在
+      # 先传 APK 再传清单：任何时刻 latest.json 指向的安装包都一定已存在。
+      # 用 s3api put-object 单次上传，绕开部分 R2 令牌未放行的
+      # CreateMultipartUpload（aws s3 cp 对大文件默认走分片上传）。
       - name: Upload APK & manifest to R2
         run: |
           set -euo pipefail
-          aws s3 cp "$APK_NAME" "s3://${R2_BUCKET}/releases/${APK_NAME}" \
-            --content-type application/vnd.android.package-archive \
-            --cache-control "public, max-age=31536000, immutable"
-          aws s3 cp latest.json "s3://${R2_BUCKET}/latest.json" \
-            --content-type application/json \
-            --cache-control "no-cache"
+          aws s3api put-object \
+            --bucket "$R2_BUCKET" \
+            --key "releases/${APK_NAME}" \
+            --body "$APK_NAME" \
+            --content-type "application/vnd.android.package-archive" \
+            --cache-control "public, max-age=31536000, immutable" \
+            > /dev/null
+          aws s3api put-object \
+            --bucket "$R2_BUCKET" \
+            --key "latest.json" \
+            --body latest.json \
+            --content-type "application/json" \
+            --cache-control "no-cache" \
+            > /dev/null
+          echo "已上传: releases/${APK_NAME} 与 latest.json"
 
       # 只保留最新 KEEP_VERSIONS 个 APK，其余从旧到新删除
       - name: Prune old releases (keep latest)
