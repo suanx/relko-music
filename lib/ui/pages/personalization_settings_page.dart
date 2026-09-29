@@ -66,7 +66,7 @@ class _PersonalizationSettingsPageState
                               ? () => tc.setGradientColors(
                                     preset.color,
                                     preset.secondary!,
-                                    preset.tertiary!,
+                                    preset.tertiary ?? preset.secondary!,
                                   )
                               : () => tc.setSeedColor(preset.color),
                         );
