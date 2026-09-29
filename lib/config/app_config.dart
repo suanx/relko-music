@@ -49,7 +49,7 @@ class AppConfig {
   /// CI 构建时会通过 --dart-define 覆盖此默认值，本地构建直接使用默认值。
   static const updateManifestUrl = String.fromEnvironment(
     'KA_MUSIC_UPDATE_MANIFEST_URL',
-    defaultValue: 'https://pub-ecb9535c425f480285e165bffc5754c7.r2.dev/latest.json',
+    defaultValue: 'https://dl.suen.us.ci/latest.json',
   );
 
   static const apiBaseUrl = String.fromEnvironment(
