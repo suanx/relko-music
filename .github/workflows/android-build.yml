@@ -1,30 +1,93 @@
-name: Build REIKO Android APK
+name: Build REIKO Android APK → Cloudflare R2
 
-# 触发条件：
-#   1. 推送到 master 或 main 分支时自动构建
-#   2. 推送 v* 标签时构建并自动发布 GitHub Release（应用内检查更新即读取最新 Release）
-#   3. 也可在 Actions 页面手动触发 (workflow_dispatch)
+# 流程：推送 master/main → 自动递增版本号并打包 → 上传 APK 到 R2 →
+#       刷新 latest.json 更新清单（提交信息即更新说明）→ 只保留最新 2 个版本。
+# 应用内「检查更新」优先读取 R2 上的 latest.json，下载地址同样指向 R2；
+# R2 不可用时回退 GitHub Releases（需另行发布）。
 on:
   push:
     branches:
       - master
       - main
-    tags:
-      - 'v*'
   workflow_dispatch:
+    inputs:
+      notes:
+        description: '更新说明（留空则使用最近一条提交信息）'
+        required: false
+        default: ''
 
-# 创建 Release 需要写权限
+# 同一时间只允许一条发布流水线：新推送取消仍在运行的旧构建，
+# 避免「旧 run 后完成、把旧版本号写回 latest.json」的竞态。
+concurrency:
+  group: android-release
+  cancel-in-progress: true
+
 permissions:
-  contents: write
+  contents: read
+
+env:
+  # ===== Cloudflare R2（需在仓库 Settings → Secrets and variables → Actions 配置）=====
+  # R2_BUCKET / R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY
+  R2_BUCKET: ${{ secrets.R2_BUCKET }}
+  AWS_ENDPOINT_URL_S3: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  AWS_DEFAULT_REGION: auto
+  # 对外下载域名：R2 桶的 r2.dev 公开访问地址或绑定的自定义域名（末尾不带 /）。
+  # 构建时会通过 --dart-define 注入应用，应用内检查更新读这个地址的 latest.json。
+  PUBLIC_BASE_URL: https://pub-ecb9535c425f480285e165bffc5754c7.r2.dev
+  # 版本码基数：旧安装包的 versionCode 是「版本号去点拼接」（如 3.1.2 -> 312）。
+  # 加上足够大的基数保证新包版本码永远大于旧包，老用户能收到一次升级提示；
+  # 之后版本码随 run_number 严格单调递增。
+  VERSION_CODE_BASE: 1000000
+  # R2 上保留的最新版本个数，超出按上传时间从旧到新自动删除
+  KEEP_VERSIONS: 2
 
 jobs:
-  build-apk:
-    name: Build Signed APK (Ubuntu)
+  release:
+    name: Build & Publish (arm64)
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # 版本号 = pubspec.yaml 的 major.minor + run_number 作为 patch。
+      # run_number 由 GitHub 按流水线自动自增且不复用，因此每次推送
+      # 版本号/版本码严格递增；无需把版本改动提交回仓库（避免无限构建循环）。
+      - name: Compute version & update notes
+        env:
+          MANUAL_NOTES: ${{ github.event.inputs.notes }}
+          COMMIT_NOTES: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          BASE_VERSION=$(grep '^version:' pubspec.yaml | head -1 | awk '{print $2}' | cut -d'+' -f1 | cut -d'.' -f1-2)
+          VERSION_NAME="${BASE_VERSION}.${GITHUB_RUN_NUMBER}"
+          VERSION_CODE=$((VERSION_CODE_BASE + GITHUB_RUN_NUMBER))
+          APK_NAME="REIKO-v${VERSION_NAME}.apk"
+
+          # 更新说明优先级：手动输入 > 本次推送的提交信息 > 最近一条提交信息
+          NOTES="$MANUAL_NOTES"
+          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
+            NOTES="$COMMIT_NOTES"
+          fi
+          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
+            NOTES=$(git log -1 --pretty=%B)
+          fi
+
+          echo "版本号   : $VERSION_NAME"
+          echo "版本码   : $VERSION_CODE"
+          echo "安装包   : $APK_NAME"
+          echo "更新说明 :"
+          echo "$NOTES"
+
+          {
+            echo "VERSION_NAME=${VERSION_NAME}"
+            echo "VERSION_CODE=${VERSION_CODE}"
+            echo "APK_NAME=${APK_NAME}"
+            echo "NOTES<<NOTES_DELIM_7Q2"
+            echo "${NOTES}"
+            echo "NOTES_DELIM_7Q2"
+          } >> "$GITHUB_ENV"
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -46,7 +109,6 @@ jobs:
 
       # 签名配置：密钥库 relko-release.keystore 随仓库提交，
       # 这里按构建时生成 android/key.properties（该文件不入库）。
-      # JitPack 冷启动失败兜底：等待后重试一次拉依赖。
       - name: Write signing config (key.properties)
         run: |
           cat > android/key.properties <<'EOF'
@@ -56,35 +118,82 @@ jobs:
           keyPassword=relko2026sign
           EOF
 
+      # --build-name / --build-number 覆盖 pubspec 版本：
+      # 安装包 versionName=VERSION_NAME，versionCode=VERSION_CODE。
+      # 清单地址经 dart-define 注入应用，与 PUBLIC_BASE_URL 保持同一配置源。
+      # JitPack 冷启动失败兜底：等待后重试一次拉依赖。
       - name: Build APK (release, arm64)
         run: |
-          flutter build apk --release || (sleep 90 && flutter build apk --release)
+          flutter build apk --release \
+            --build-name="$VERSION_NAME" \
+            --build-number="$VERSION_CODE" \
+            --dart-define=KA_MUSIC_UPDATE_MANIFEST_URL="${PUBLIC_BASE_URL}/latest.json" \
+            || (sleep 90 && flutter build apk --release \
+                  --build-name="$VERSION_NAME" \
+                  --build-number="$VERSION_CODE" \
+                  --dart-define=KA_MUSIC_UPDATE_MANIFEST_URL="${PUBLIC_BASE_URL}/latest.json")
 
       - name: Rename APK
         run: |
-          VERSION=$(grep '^version:' pubspec.yaml | head -1 | awk '{print $2}' | cut -d'+' -f1)
-          cp build/app/outputs/flutter-apk/app-release.apk "REIKO-v${VERSION}.apk"
-          echo "APK: REIKO-v${VERSION}.apk ($(du -h "REIKO-v${VERSION}.apk" | cut -f1))"
-          echo "apk_name=REIKO-v${VERSION}.apk" >> "$GITHUB_ENV"
+          cp build/app/outputs/flutter-apk/app-release.apk "$APK_NAME"
+          echo "APK: $APK_NAME ($(du -h "$APK_NAME" | cut -f1))"
 
-      # 方式一：通过工作流产物 (Artifacts) 提供下载（每次构建都会生成）
+      # 工作流产物仅作调试留存，正式分发走 R2
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: REIKO-apk
-          path: ${{ env.apk_name }}
-          retention-days: 30
+          path: ${{ env.APK_NAME }}
+          retention-days: 7
 
-      # 方式二：推送 v* 标签时自动创建 GitHub Release 并附上 APK。
-      # 应用内「检查更新」读取最新 Release：tag 为版本号，body 为更新说明，
-      # body 中包含 [force] 标记时视为强制更新。
-      - name: Create GitHub Release (on tag push)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          name: REIKO ${{ github.ref_name }}
-          tag_name: ${{ github.ref_name }}
-          files: ${{ env.apk_name }}
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # latest.json 字段与应用内 AppVersionInfo.fromJson 完全对应，
+      # 应用端无需新增解析逻辑；说明中包含 [force] 标记时视为强制更新。
+      - name: Build update manifest (latest.json)
+        run: |
+          set -euo pipefail
+          FORCE=false
+          if echo "$NOTES" | grep -qi '\[force\]'; then
+            FORCE=true
+          fi
+          jq -n \
+            --arg platform android \
+            --arg versionName "$VERSION_NAME" \
+            --argjson versionCode "$VERSION_CODE" \
+            --arg updateContent "$NOTES" \
+            --arg downloadUrl "${PUBLIC_BASE_URL}/releases/${APK_NAME}" \
+            --argjson forceUpdate "$FORCE" \
+            --arg releaseDate "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg sha256 "$(sha256sum "$APK_NAME" | awk '{print $1}')" \
+            '{platform:$platform, versionName:$versionName, versionCode:$versionCode,
+              updateContent:$updateContent, downloadUrl:$downloadUrl,
+              forceUpdate:$forceUpdate, releaseDate:$releaseDate, sha256:$sha256}' > latest.json
+          cat latest.json
+
+      # 先传 APK 再传清单：任何时刻 latest.json 指向的安装包都一定已存在
+      - name: Upload APK & manifest to R2
+        run: |
+          set -euo pipefail
+          aws s3 cp "$APK_NAME" "s3://${R2_BUCKET}/releases/${APK_NAME}" \
+            --content-type application/vnd.android.package-archive \
+            --cache-control "public, max-age=31536000, immutable"
+          aws s3 cp latest.json "s3://${R2_BUCKET}/latest.json" \
+            --content-type application/json \
+            --cache-control "no-cache"
+
+      # 只保留最新 KEEP_VERSIONS 个 APK，其余从旧到新删除
+      - name: Prune old releases (keep latest)
+        run: |
+          set -euo pipefail
+          OLD_KEYS=$(aws s3api list-objects-v2 --bucket "$R2_BUCKET" --prefix "releases/" --output json \
+            | jq -r --argjson keep "$KEEP_VERSIONS" \
+              '[.Contents[]? | select(.Key | endswith(".apk"))]
+               | sort_by(.LastModified) | reverse | .[$keep:][]?.Key')
+          if [ -z "$OLD_KEYS" ]; then
+            echo "没有需要清理的旧版本"
+            exit 0
+          fi
+          while IFS= read -r key; do
+            [ -z "$key" ] && continue
+            aws s3api delete-object --bucket "$R2_BUCKET" --key "$key" >/dev/null
+            echo "已删除旧版本: $key"
+          done <<< "$OLD_KEYS"

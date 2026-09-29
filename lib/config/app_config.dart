@@ -11,7 +11,9 @@ class AppConfig {
   static const _fallbackVersion = '3.1.0';
 
   /// 应用版本号与版本码（启动时从 PackageInfo 加载，见 [loadAppVersion]）。
-  /// 版本码为版本号去点后的数字串（如 3.1.1 -> 311），供检查更新比较。
+  /// 版本码优先取 CI 通过 --build-number 注入的 buildNumber（随每次构建
+  /// 单调递增）；本地构建无 buildNumber 时回退为版本号去点后的数字串
+  /// （如 3.1.1 -> 311），供检查更新比较。
   static String appVersion = _fallbackVersion;
   static String appVersionCode = _fallbackVersion;
 
@@ -24,6 +26,13 @@ class AppConfig {
         appVersion = info.version.trim();
         appVersionCode = info.version.trim();
       }
+      // CI 构建注入的 buildNumber（= R2 清单的 versionCode，随每次构建
+      // 单调递增）。存在且合法时优先使用，避免「版本号去点拼接」在
+      // patch 位进位（3.1.9 -> 3.1.10，319 vs 3110）时的比较歧义。
+      final buildNumber = int.tryParse(info.buildNumber);
+      if (buildNumber != null && buildNumber > 0) {
+        appVersionCode = '$buildNumber';
+      }
     } catch (_) {
       // 读取失败时保留兜底常量，不影响应用启动。
     }
@@ -34,6 +43,14 @@ class AppConfig {
 
   /// 应用更新仓库：检查更新/下载安装包均来自该仓库的 GitHub Releases。
   static const updateRepoUrl = 'suanx/relko-music';
+
+  /// 应用更新清单地址（R2 公开访问的 latest.json）。
+  /// 检查更新优先读取该清单，失败时回退到 [updateRepoUrl] 的 GitHub Releases。
+  /// CI 构建时会通过 --dart-define 覆盖此默认值，本地构建直接使用默认值。
+  static const updateManifestUrl = String.fromEnvironment(
+    'KA_MUSIC_UPDATE_MANIFEST_URL',
+    defaultValue: 'https://pub-ecb9535c425f480285e165bffc5754c7.r2.dev/latest.json',
+  );
 
   static const apiBaseUrl = String.fromEnvironment(
     'KA_MUSIC_API_BASE_URL',

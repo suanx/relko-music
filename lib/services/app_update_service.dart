@@ -8,19 +8,24 @@ import '../config/app_config.dart';
 import '../models/app_version.dart';
 import '../models/music_models.dart';
 
-/// 通过 GitHub Releases 检查并分发应用更新。
+/// 检查并分发应用更新。
 ///
-/// 更新仓库地址由 [AppConfig.updateRepoUrl] 决定：
-/// - 版本号取 release 的 tag（如 `v3.2.0`）；
-/// - 更新说明取 release body；
-/// - 下载地址取 release 资产中的 .apk 文件（优先 arm64）；
-/// - release body 中包含 `[force]` 标记时视为强制更新。
+/// 更新源优先级：
+/// 1. R2 更新清单 [AppConfig.updateManifestUrl]（latest.json，字段与
+///    [AppVersionInfo.fromJson] 一致：versionName / versionCode /
+///    updateContent / downloadUrl / forceUpdate / releaseDate）；
+/// 2. 回退：GitHub Releases（[AppConfig.updateRepoUrl]）——
+///    版本号取 release 的 tag（如 `v3.2.0`）；
+///    更新说明取 release body；
+///    下载地址取 release 资产中的 .apk 文件（优先 arm64）；
+///    release body 中包含 `[force]` 标记时视为强制更新。
 class AppUpdateService {
   AppUpdateService();
 
   static const String _updateRepo = AppConfig.updateRepoUrl;
   static const String _latestReleaseApi =
       'https://api.github.com/repos/$_updateRepo/releases/latest';
+  static const String _manifestUrl = AppConfig.updateManifestUrl;
 
   static bool get isSupportedPlatform {
     return !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -31,11 +36,31 @@ class AppUpdateService {
       return null;
     }
 
-    final version = await fetchLatestRelease();
+    AppVersionInfo? version;
+    try {
+      version = await fetchLatestManifest();
+    } catch (error) {
+      debugPrint('[Update] R2 更新清单读取失败，回退 GitHub Releases：$error');
+    }
+    version ??= await fetchLatestRelease();
     if (version == null || !version.isNewerThanCurrent) {
       return null;
     }
     return version;
+  }
+
+  /// 拉取 R2 上的 latest.json 更新清单并解析为 [AppVersionInfo]。
+  Future<AppVersionInfo?> fetchLatestManifest() async {
+    final uri = Uri.parse(_manifestUrl);
+    final response = await http.get(uri).timeout(const Duration(seconds: 20));
+
+    if (response.statusCode != 200) {
+      throw StateError('检查更新失败（HTTP ${response.statusCode}）');
+    }
+
+    final json = asMap(jsonDecode(utf8.decode(response.bodyBytes)));
+    final info = AppVersionInfo.fromJson(json);
+    return info.hasDownloadUrl ? info : null;
   }
 
   /// 拉取最新 Release 并解析为 [AppVersionInfo]，无可用 .apk 资产时返回 null。
