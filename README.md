@@ -245,7 +245,8 @@ flutter run --dart-define=KA_MUSIC_API_BASE_URL=https://your-api.com
 1. **计算版本** — 版本号/版本码按上述规则自动递增，更新说明取自提交信息；
 2. **构建签名 APK** — arm64 release，签名密钥随仓库提供；
 3. **上传 R2** — APK 上传至 `releases/` 目录，同时生成 `latest.json` 更新清单；
-4. **清理旧版本** — R2 仅保留最新 **2** 个安装包，其余自动删除。
+4. **清理旧版本** — R2 仅保留最新 **2** 个安装包，其余自动删除；
+5. **发布 GitHub Release** — 以版本号为 tag（如 `v3.1.16`）创建 Release，附上 APK 与更新说明，同时作为 R2 不可用时的备用更新源。
 
 `latest.json` 结构：
 

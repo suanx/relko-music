@@ -1,9 +1,10 @@
 name: Build REIKO Android APK → Cloudflare R2
 
 # 流程：推送 master/main → 自动递增版本号并打包 → 上传 APK 到 R2 →
-#       刷新 latest.json 更新清单（提交信息即更新说明）→ 只保留最新 2 个版本。
+#       刷新 latest.json 更新清单（提交信息即更新说明）→ 只保留最新 2 个版本
+#       → 以版本号为 tag 创建 GitHub Release（附 APK 与更新说明）。
 # 应用内「检查更新」优先读取 R2 上的 latest.json，下载地址同样指向 R2；
-# R2 不可用时回退 GitHub Releases（需另行发布）。
+# R2 不可用时回退 GitHub Releases。
 on:
   push:
     branches:
@@ -22,8 +23,9 @@ concurrency:
   group: android-release
   cancel-in-progress: true
 
+# 创建 GitHub Release 需要写权限
 permissions:
-  contents: read
+  contents: write
 
 env:
   # ===== Cloudflare R2（需在仓库 Settings → Secrets and variables → Actions 配置）=====
@@ -89,6 +91,9 @@ jobs:
             echo "NOTES_DELIM_7Q2"
           } >> "$GITHUB_ENV"
 
+          # GitHub Release 正文（更新说明）
+          printf '%s\n' "$NOTES" > release_notes.md
+
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
@@ -145,6 +150,20 @@ jobs:
           name: REIKO-apk
           path: ${{ env.APK_NAME }}
           retention-days: 7
+
+      # 每次构建发布 GitHub Release：tag 为版本号（如 v3.1.16），
+      # 正文为更新说明（提交信息），附上 APK。
+      # 同时作为应用内检查更新的备用更新源（R2 不可用时回退），
+      # 也让旧版本客户端（只读 GitHub Releases）能收到升级提示。
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION_NAME }}
+          name: REIKO v${{ env.VERSION_NAME }}
+          body_path: release_notes.md
+          files: ${{ env.APK_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # latest.json 字段与应用内 AppVersionInfo.fromJson 完全对应，
       # 应用端无需新增解析逻辑；说明中包含 [force] 标记时视为强制更新。
