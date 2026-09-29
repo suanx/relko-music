@@ -7,31 +7,28 @@ class Artwork extends StatelessWidget {
     this.url,
     required this.size,
     this.borderRadius = 8,
-    this.icon = Icons.music_note_rounded,
   });
 
   final String? url;
   final double size;
   final double borderRadius;
-  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
     final imageUrl = url;
     final child = imageUrl == null
-        ? _Fallback(icon: icon)
+        ? _Fallback(size: size)
         : imageUrl.startsWith('content://')
             ? _ContentUriImage(
                 uri: imageUrl,
                 size: size,
                 borderRadius: borderRadius,
-                icon: icon,
               )
             : Image.network(
                 imageUrl,
                 fit: BoxFit.cover,
                 errorBuilder: (context, error, stackTrace) =>
-                    _Fallback(icon: icon),
+                    _Fallback(size: size),
                 loadingBuilder: (context, child, progress) {
                   if (progress == null) {
                     return child;
@@ -58,13 +55,11 @@ class _ContentUriImage extends StatefulWidget {
     required this.uri,
     required this.size,
     required this.borderRadius,
-    required this.icon,
   });
 
   final String uri;
   final double size;
   final double borderRadius;
-  final IconData icon;
 
   @override
   State<_ContentUriImage> createState() => _ContentUriImageState();
@@ -123,20 +118,26 @@ class _ContentUriImageState extends State<_ContentUriImage> {
       return _ShimmerBox(size: widget.size, borderRadius: widget.borderRadius);
     }
     if (_bytes == null) {
-      return _Fallback(icon: widget.icon);
+      return _Fallback(size: widget.size);
     }
     return Image.memory(_bytes!, fit: BoxFit.cover);
   }
 }
 
 class _Fallback extends StatelessWidget {
-  const _Fallback({required this.icon});
+  const _Fallback({required this.size});
 
-  final IconData icon;
+  /// 容器边长；无限大（整页填充）时按固定尺寸渲染。
+  final double size;
+
+  /// 无封面歌曲的默认占位图（App 吉祥物，带透明背景）。
+  static const _defaultCoverAsset = 'lib/assets/default_cover.png';
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final imageExtent =
+        size.isFinite ? (size * 0.62).clamp(28.0, 140.0) : 96.0;
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -149,7 +150,15 @@ class _Fallback extends StatelessWidget {
           ],
         ),
       ),
-      child: Icon(icon, color: Colors.white, size: 28),
+      child: Center(
+        child: Image.asset(
+          _defaultCoverAsset,
+          width: imageExtent,
+          height: imageExtent,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.medium,
+        ),
+      ),
     );
   }
 }

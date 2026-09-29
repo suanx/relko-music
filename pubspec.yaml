@@ -36,3 +36,4 @@ flutter:
   assets:
     - update.md
     - lib/assets/logo.png
+    - lib/assets/default_cover.png
