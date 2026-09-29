@@ -95,6 +95,36 @@ class PlayerController extends ChangeNotifier {
       name: '电子',
       levels: [650, 450, 120, -120, -180, 100, 350, 550, 650, 700],
     ),
+    AudioEffectPreset(
+      name: '爵士',
+      levels: [300, 200, 100, 150, -100, -100, 0, 150, 250, 300],
+    ),
+    AudioEffectPreset(
+      name: '舞曲',
+      levels: [550, 450, 100, 0, 150, 200, 100, 0, 300, 450],
+    ),
+    AudioEffectPreset(
+      name: '嘻哈',
+      levels: [650, 550, 150, 0, -100, 0, 50, 150, 250, 300],
+    ),
+    AudioEffectPreset(
+      name: '民谣',
+      levels: [250, 300, 100, 0, 100, 200, 300, 250, 150, 50],
+    ),
+    AudioEffectPreset(
+      name: '乡村',
+      levels: [350, 250, 0, 0, -50, 0, 150, 250, 350, 300],
+    ),
+    AudioEffectPreset(
+      name: '3D环绕',
+      levels: [450, 350, 150, -50, -150, -100, 100, 250, 400, 500],
+    ),
+    // 蝰蛇音效：借鉴 ViPER4Android 的调音风格——重低音冲击 + 声音
+    // 清晰度 + 高频空气感，V 形曲线并额外强化超低频。
+    AudioEffectPreset(
+      name: '蝰蛇音效',
+      levels: [700, 600, 350, 50, -100, -50, 100, 250, 400, 550],
+    ),
   ];
 
   /// 下载控制器（由 main.dart 在创建后注入，供 UI 访问下载功能）。
