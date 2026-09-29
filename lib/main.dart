@@ -185,10 +185,14 @@ class _KaMusicAppState extends State<KaMusicApp> with WidgetsBindingObserver {
           themeMode: _theme.themeMode,
           theme: AppTheme.light(
             seedColor: _theme.seedColor,
+            secondaryColor: _theme.secondarySeedColor,
+            tertiaryColor: _theme.tertiarySeedColor,
             transparentBackground: _theme.backgroundEnabled,
           ),
           darkTheme: AppTheme.dark(
             seedColor: _theme.seedColor,
+            secondaryColor: _theme.secondarySeedColor,
+            tertiaryColor: _theme.tertiarySeedColor,
             transparentBackground: _theme.backgroundEnabled,
           ),
           builder: (context, child) {

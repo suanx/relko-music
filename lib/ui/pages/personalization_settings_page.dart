@@ -55,12 +55,20 @@ class _PersonalizationSettingsPageState
                       spacing: 14,
                       runSpacing: 14,
                       children: ThemeController.presetColors.map((preset) {
-                        final selected = tc.seedColor == preset.color;
+                        final selected = tc.seedColor == preset.color &&
+                            tc.secondarySeedColor == preset.secondary;
                         return _ColorDot(
                           color: preset.color,
+                          gradientColor: preset.secondary,
                           label: preset.name,
                           selected: selected,
-                          onTap: () => tc.setSeedColor(preset.color),
+                          onTap: preset.isGradient
+                              ? () => tc.setGradientColors(
+                                    preset.color,
+                                    preset.secondary!,
+                                    preset.tertiary!,
+                                  )
+                              : () => tc.setSeedColor(preset.color),
                         );
                       }).toList(),
                     ),
@@ -199,9 +207,13 @@ class _ColorDot extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.gradientColor,
   });
 
   final Color color;
+
+  /// 渐变辅色：非空时色点以「主色 → 辅色」渐变渲染。
+  final Color? gradientColor;
   final String label;
   final bool selected;
   final VoidCallback onTap;
@@ -218,13 +230,20 @@ class _ColorDot extends StatelessWidget {
             height: 46,
             decoration: BoxDecoration(
               color: color,
+              gradient: gradientColor == null
+                  ? null
+                  : LinearGradient(
+                      colors: [color, gradientColor!],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
               shape: BoxShape.circle,
               border: selected
                   ? Border.all(color: Theme.of(context).colorScheme.onSurface, width: 3)
                   : null,
               boxShadow: [
                 BoxShadow(
-                  color: color.withValues(alpha: .35),
+                  color: (gradientColor ?? color).withValues(alpha: .35),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),

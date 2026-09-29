@@ -6,29 +6,45 @@ class AppTheme {
   static const blue = Color(0xFF1478FF);
   static const musicRed = Color(0xFFFF2D55);
 
-  static ThemeData light({Color? seedColor, bool transparentBackground = false}) {
+  static ThemeData light({
+    Color? seedColor,
+    Color? secondaryColor,
+    Color? tertiaryColor,
+    bool transparentBackground = false,
+  }) {
     return _theme(Brightness.light,
         seedColor: seedColor ?? blue,
+        secondaryColor: secondaryColor,
+        tertiaryColor: tertiaryColor,
         transparentBackground: transparentBackground);
   }
 
-  static ThemeData dark({Color? seedColor, bool transparentBackground = false}) {
+  static ThemeData dark({
+    Color? seedColor,
+    Color? secondaryColor,
+    Color? tertiaryColor,
+    bool transparentBackground = false,
+  }) {
     return _theme(Brightness.dark,
         seedColor: seedColor ?? blue,
+        secondaryColor: secondaryColor,
+        tertiaryColor: tertiaryColor,
         transparentBackground: transparentBackground);
   }
 
   static ThemeData _theme(
     Brightness brightness, {
     Color seedColor = blue,
+    Color? secondaryColor,
+    Color? tertiaryColor,
     bool transparentBackground = false,
   }) {
     final isDark = brightness == Brightness.dark;
     final scheme = ColorScheme.fromSeed(seedColor: seedColor, brightness: brightness)
         .copyWith(
           primary: isDark ? _lighten(seedColor, 0.18) : seedColor,
-          secondary: musicRed,
-          tertiary: const Color(0xFF24C768),
+          secondary: secondaryColor ?? musicRed,
+          tertiary: tertiaryColor ?? const Color(0xFF24C768),
           surface: isDark ? const Color(0xFF0B0C10) : Colors.white,
           surfaceContainerLowest: isDark
               ? const Color(0xFF06070A)

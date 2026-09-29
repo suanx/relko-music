@@ -25,6 +25,8 @@ class ThemeController extends ChangeNotifier {
 
   // ===== SharedPreferences keys =====
   static const _seedColorKey = 'theme.seed_color';
+  static const _secondaryColorKey = 'theme.secondary_color';
+  static const _tertiaryColorKey = 'theme.tertiary_color';
   static const _bgEnabledKey = 'theme.bg_enabled';
   static const _bgImagePathKey = 'theme.bg_image_path';
   static const _bgOpacityKey = 'theme.bg_opacity';
@@ -39,19 +41,58 @@ class ThemeController extends ChangeNotifier {
   /// 车机模式下文字放大倍数（远距离观看更清晰）。
   static const double carModeFontScaleFactor = 1.12;
 
-  /// 预设种子色列表。
+  /// 预设配色列表。
+  ///
+  /// 普通预设只带主色；渐变预设额外携带辅色与第三色，
+  /// 用于驱动液态玻璃极光背景等处的双色渐变。
   static const presetColors = <_PresetColor>[
     _PresetColor(name: '经典蓝', color: Color(0xFF1478FF)),
-    _PresetColor(name: '酷狗红', color: Color(0xFFFF2D55)),
     _PresetColor(name: '清新绿', color: Color(0xFF24C768)),
-    _PresetColor(name: '优雅紫', color: Color(0xFF8B5CF6)),
     _PresetColor(name: '暖阳橙', color: Color(0xFFF59E0B)),
-    _PresetColor(name: '樱花粉', color: Color(0xFFEC4899)),
-    _PresetColor(name: '天际青', color: Color(0xFF06B6D4)),
     _PresetColor(name: '石墨灰', color: Color(0xFF64748B)),
+    _PresetColor(
+      name: '落日霞光',
+      color: Color(0xFFFF7E5F),
+      secondary: Color(0xFFFEB47B),
+      tertiary: Color(0xFFFFD3A5),
+    ),
+    _PresetColor(
+      name: '极光幻境',
+      color: Color(0xFF00C9A7),
+      secondary: Color(0xFF7C5CFF),
+      tertiary: Color(0xFF22D3EE),
+    ),
+    _PresetColor(
+      name: '星云紫',
+      color: Color(0xFF7C3AED),
+      secondary: Color(0xFF4F46E5),
+      tertiary: Color(0xFFC084FC),
+    ),
+    _PresetColor(
+      name: '青柠汽水',
+      color: Color(0xFF65A30D),
+      secondary: Color(0xFF14B8A6),
+      tertiary: Color(0xFFBEF264),
+    ),
+    _PresetColor(
+      name: '深海蓝',
+      color: Color(0xFF0284C7),
+      secondary: Color(0xFF1D4ED8),
+      tertiary: Color(0xFF38BDF8),
+    ),
+    _PresetColor(
+      name: '熔岩橙红',
+      color: Color(0xFFEA580C),
+      secondary: Color(0xFFDC2626),
+      tertiary: Color(0xFFFBBF24),
+    ),
   ];
 
   Color _seedColor = const Color(0xFF1478FF);
+
+  /// 渐变配色的辅色与第三色（null 表示当前不是渐变配色）。
+  Color? _secondaryColor;
+  Color? _tertiaryColor;
   ThemeMode _themeMode = ThemeMode.system;
   bool _backgroundEnabled = false;
   String? _backgroundImagePath;
@@ -67,6 +108,10 @@ class ThemeController extends ChangeNotifier {
   bool? _lastAppliedCarModeEnabled;
 
   Color get seedColor => _seedColor;
+
+  /// 渐变配色的辅色与第三色（null 表示当前不是渐变配色）。
+  Color? get secondarySeedColor => _secondaryColor;
+  Color? get tertiarySeedColor => _tertiaryColor;
   ThemeMode get themeMode => _themeMode;
   String get themeModeLabel => switch (_themeMode) {
         ThemeMode.system => '跟随系统',
@@ -82,8 +127,9 @@ class ThemeController extends ChangeNotifier {
   double get fontScale => _fontScale;
   bool get isAutomotiveDevice => _isAutomotiveDevice;
 
-  /// 是否使用了非默认种子色。
-  bool get hasCustomSeedColor => _seedColor != const Color(0xFF1478FF);
+  /// 是否使用了非默认配色（非默认种子色或渐变配色）。
+  bool get hasCustomSeedColor =>
+      _seedColor != const Color(0xFF1478FF) || _secondaryColor != null;
 
   /// 检测是否为 Android Automotive 车机并缓存结果。
   /// 设备类型不变，启动时调用一次即可。须在 [load] 之前调用，
@@ -99,6 +145,10 @@ class ThemeController extends ChangeNotifier {
     if (colorValue != null) {
       _seedColor = Color(colorValue);
     }
+    final secondaryValue = prefs.getInt(_secondaryColorKey);
+    _secondaryColor = secondaryValue == null ? null : Color(secondaryValue);
+    final tertiaryValue = prefs.getInt(_tertiaryColorKey);
+    _tertiaryColor = tertiaryValue == null ? null : Color(tertiaryValue);
     _backgroundEnabled = prefs.getBool(_bgEnabledKey) ?? false;
     _backgroundImagePath = prefs.getString(_bgImagePathKey);
     _landscapeEnabled = prefs.getBool(_landscapeEnabledKey) ?? false;
@@ -141,12 +191,38 @@ class ThemeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 设置全局种子色。
+  /// 设置全局种子色（普通单色配色，会清除渐变配色）。
   Future<void> setSeedColor(Color color) async {
-    if (_seedColor == color) return;
+    if (_seedColor == color && _secondaryColor == null) return;
     _seedColor = color;
+    _secondaryColor = null;
+    _tertiaryColor = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_seedColorKey, color.toARGB32());
+    await prefs.remove(_secondaryColorKey);
+    await prefs.remove(_tertiaryColorKey);
+    notifyListeners();
+  }
+
+  /// 应用渐变配色：主色驱动整体配色，辅色与第三色驱动
+  /// 液态玻璃极光背景等处的双色渐变。
+  Future<void> setGradientColors(
+    Color primary,
+    Color secondary,
+    Color tertiary,
+  ) async {
+    if (_seedColor == primary &&
+        _secondaryColor == secondary &&
+        _tertiaryColor == tertiary) {
+      return;
+    }
+    _seedColor = primary;
+    _secondaryColor = secondary;
+    _tertiaryColor = tertiary;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_seedColorKey, primary.toARGB32());
+    await prefs.setInt(_secondaryColorKey, secondary.toARGB32());
+    await prefs.setInt(_tertiaryColorKey, tertiary.toARGB32());
     notifyListeners();
   }
 
@@ -280,10 +356,21 @@ class ThemeController extends ChangeNotifier {
   }
 }
 
-/// 预设颜色项。
+/// 预设配色项。
 class _PresetColor {
-  const _PresetColor({required this.name, required this.color});
+  const _PresetColor({
+    required this.name,
+    required this.color,
+    this.secondary,
+    this.tertiary,
+  });
 
   final String name;
   final Color color;
+
+  /// 渐变辅色与第三色（非空表示渐变配色方案）。
+  final Color? secondary;
+  final Color? tertiary;
+
+  bool get isGradient => secondary != null;
 }
