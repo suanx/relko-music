@@ -93,7 +93,6 @@ BEGIN
             VALUE "FileDescription", "REIKO" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "kgka_music_hl" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
             VALUE "OriginalFilename", "kgka_music_hl.exe" "\0"
             VALUE "ProductName", "REIKO" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

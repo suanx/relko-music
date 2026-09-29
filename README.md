@@ -14,7 +14,6 @@
   <img src="https://img.shields.io/badge/Flutter-3.11+-02569B?logo=flutter&logoColor=white" alt="Flutter" />
   <img src="https://img.shields.io/badge/Dart-3.11+-0175C2?logo=dart&logoColor=white" alt="Dart" />
   <img src="https://img.shields.io/badge/Version-3.1.x-4CAF50" alt="Version" />
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License" />
 </p>
 
 <p align="center">
@@ -339,8 +338,3 @@ lib/
 
 本项目仅供学习交流使用，请勿用于商业用途。
 
----
-
-<p align="center">
-  <sub>Made with XiaoMai and Flutter</sub>
-</p>
