@@ -135,29 +135,93 @@ class _Fallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final imageExtent =
-        size.isFinite ? (size * 0.62).clamp(28.0, 140.0) : 96.0;
+    // 全幅场景（播放页传 size 无限大）按屏幕短边取比例，其余按容器边长等比缩放，
+    // 保证吉祥物在大封面上协调、在小列表项里不溢出。
+    final double imageExtent;
+    if (size.isFinite) {
+      imageExtent = (size * 0.68).clamp(28.0, 300.0);
+    } else {
+      final shortestSide = MediaQuery.sizeOf(context).shortestSide;
+      imageExtent = (shortestSide * 0.5).clamp(96.0, 280.0);
+    }
     return DecoratedBox(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            colorScheme.primary.withValues(alpha: .88),
-            const Color(0xFF70D6FF),
-            colorScheme.secondary.withValues(alpha: .72),
+            Color(0xFFFFD9BE),
+            Color(0xFFFFEFE6),
+            Color(0xFFFCE3D4),
           ],
         ),
       ),
-      child: Center(
-        child: Image.asset(
-          _defaultCoverAsset,
-          width: imageExtent,
-          height: imageExtent,
-          fit: BoxFit.contain,
-          filterQuality: FilterQuality.medium,
-        ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 液态玻璃磨砂质感：左上柔光 + 右下暖调弥散 + 斜向玻璃高光
+          const _GlassSheen(),
+          Center(
+            child: Image.asset(
+              _defaultCoverAsset,
+              width: imageExtent,
+              height: imageExtent,
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.medium,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 液态玻璃磨砂高光层：纯装饰性叠层，模拟玻璃的柔光、弥散与斜向反光。
+class _GlassSheen extends StatelessWidget {
+  const _GlassSheen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const IgnorePointer(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 左上角白色柔光（玻璃受光面）
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: Alignment(-0.7, -0.8),
+                radius: 1.1,
+                colors: [Color(0x8FFFFFFF), Color(0x00FFFFFF)],
+              ),
+            ),
+          ),
+          // 右下角暖杏弥散光晕（液态流动感）
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: Alignment(0.8, 0.9),
+                radius: 1.0,
+                colors: [Color(0x66FFC49B), Color(0x00FFC49B)],
+              ),
+            ),
+          ),
+          // 斜向玻璃反光条
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment(0.1, 0.55),
+                colors: [
+                  Color(0x59FFFFFF),
+                  Color(0x14FFFFFF),
+                  Color(0x00FFFFFF),
+                ],
+                stops: [0, 0.45, 0.8],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
