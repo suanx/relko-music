@@ -1,3 +1,5 @@
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -135,93 +137,98 @@ class _Fallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 全幅场景（播放页传 size 无限大）按屏幕短边取比例，其余按容器边长等比缩放，
-    // 保证吉祥物在大封面上协调、在小列表项里不溢出。
-    final double imageExtent;
-    if (size.isFinite) {
-      imageExtent = (size * 0.68).clamp(28.0, 300.0);
-    } else {
-      final shortestSide = MediaQuery.sizeOf(context).shortestSide;
-      imageExtent = (shortestSide * 0.5).clamp(96.0, 280.0);
-    }
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFFFFD9BE),
-            Color(0xFFFFEFE6),
-            Color(0xFFFCE3D4),
+    // 吉祥物统一占背景边长的 70%；全幅场景（size 无限大）用 LayoutBuilder
+    // 拿真实约束尺寸计算，所有调用点（播放页、专辑网格等）自动适配。
+    Widget buildBody(double imageExtent) {
+      return DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFFFE9A8),
+              Color(0xFFFFF6DC),
+              Color(0xFFBFE0FA),
+            ],
+          ),
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 暖黄与浅蓝弥散光斑，整体高斯模糊 60 营造朦胧眩晕感
+            const _GlassSheen(),
+            Center(
+              child: Image.asset(
+                _defaultCoverAsset,
+                width: imageExtent,
+                height: imageExtent,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.medium,
+              ),
+            ),
           ],
         ),
-      ),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // 液态玻璃磨砂质感：左上柔光 + 右下暖调弥散 + 斜向玻璃高光
-          const _GlassSheen(),
-          Center(
-            child: Image.asset(
-              _defaultCoverAsset,
-              width: imageExtent,
-              height: imageExtent,
-              fit: BoxFit.contain,
-              filterQuality: FilterQuality.medium,
-            ),
-          ),
-        ],
-      ),
+      );
+    }
+
+    if (size.isFinite) {
+      return buildBody((size * 0.70).clamp(28.0, 600.0));
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final side = constraints.biggest.shortestSide;
+        return buildBody((side * 0.70).clamp(96.0, 600.0));
+      },
     );
   }
 }
 
-/// 液态玻璃磨砂高光层：纯装饰性叠层，模拟玻璃的柔光、弥散与斜向反光。
+/// 背景弥散光斑层：暖黄与浅蓝交错光晕，整体高斯模糊（sigma 60），
+/// 形成柔和的朦胧眩晕感。纯装饰性叠层，不参与命中测试。
 class _GlassSheen extends StatelessWidget {
   const _GlassSheen();
 
   @override
   Widget build(BuildContext context) {
-    return const IgnorePointer(
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // 左上角白色柔光（玻璃受光面）
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                center: Alignment(-0.7, -0.8),
-                radius: 1.1,
-                colors: [Color(0x8FFFFFFF), Color(0x00FFFFFF)],
+    return IgnorePointer(
+      child: ImageFiltered(
+        imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
+        child: const Stack(
+          fit: StackFit.expand,
+          children: [
+            // 左上暖黄光晕
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(-0.55, -0.6),
+                  radius: 0.9,
+                  colors: [Color(0xC8FFD166), Color(0x00FFD166)],
+                ),
               ),
             ),
-          ),
-          // 右下角暖杏弥散光晕（液态流动感）
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                center: Alignment(0.8, 0.9),
-                radius: 1.0,
-                colors: [Color(0x66FFC49B), Color(0x00FFC49B)],
+            // 右下浅蓝光晕
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(0.65, 0.7),
+                  radius: 1.0,
+                  colors: [Color(0xC88FCBFF), Color(0x008FCBFF)],
+                ),
               ),
             ),
-          ),
-          // 斜向玻璃反光条
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment(0.1, 0.55),
-                colors: [
-                  Color(0x59FFFFFF),
-                  Color(0x14FFFFFF),
-                  Color(0x00FFFFFF),
-                ],
-                stops: [0, 0.45, 0.8],
+            // 中部穿插的浅蓝斜向流光，增强渐变交融的眩晕感
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topRight,
+                  end: Alignment.bottomLeft,
+                  colors: [Color(0x66A8D8FF), Color(0x00A8D8FF), Color(0x59FFE28A)],
+                  stops: [0, 0.5, 1],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
