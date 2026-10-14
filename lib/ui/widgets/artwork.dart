@@ -101,7 +101,14 @@ class _CachedNetworkImageState extends State<_CachedNetworkImage> {
 
   Future<void> _load() async {
     final url = widget.url;
-    final file = await ArtworkCacheService.instance.fetch(url);
+    File? file;
+    try {
+      file = await ArtworkCacheService.instance.fetch(url);
+    } catch (_) {
+      // 兜底：缓存层任何异常都不能让骨架屏永远停住（_loading 不复位
+      // 就是「封面一直转圈」。缓存层已尽力自吞异常，这里是双保险）。
+      file = null;
+    }
     if (!mounted || url != widget.url) return;
     setState(() {
       _file = file;

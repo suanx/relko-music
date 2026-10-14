@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -38,7 +39,9 @@ class ArtworkCacheService {
   Future<File?> _fetch(String url) async {
     try {
       final dir = await _cacheDir();
-      final digest = sha1.convert(url.codeUnits);
+      // 之前用 url.codeUnits 做哈希：code unit 可大于 255，超出字节范围，
+      // 对非 ASCII URL 会产生歧义哈希；utf8 字节才是规范的哈希输入。
+      final digest = sha1.convert(utf8.encode(url));
       final file = File('${dir.path}/$digest.jpg');
 
       if (await file.exists()) {
@@ -60,16 +63,27 @@ class ArtworkCacheService {
 
       unawaited(_enforceDiskLimit(dir));
       return file;
-    } on Exception {
-      // 下载失败（超时/断网/非图片响应）时静默降级为占位图。
+    } catch (_) {
+      // 下载/写盘失败（超时、断网、目录不可写等）时静默降级为占位图。
+      // 注意用 catch(_) 而不是 on Exception：插件缺失这类 Error 不继承
+      // Exception，漏掉会让调用方的 Future 永远挂起、封面停在骨架屏。
       return null;
     }
   }
 
   Future<Directory> _cacheDir() async {
-    return _dir ??= Directory(
+    return _dir ??= await _ensureCacheDir();
+  }
+
+  /// 子目录必须显式创建：getTemporaryDirectory() 只保证 cache/ 存在，
+  /// 直接往不存在的 artwork_cache/ 里写文件会抛 FileSystemException。
+  /// 这是 v3.1.21/22 全部封面加载失败的根因。
+  Future<Directory> _ensureCacheDir() async {
+    final dir = Directory(
       '${(await getTemporaryDirectory()).path}/artwork_cache',
     );
+    await dir.create(recursive: true);
+    return dir;
   }
 
   /// 超出磁盘上限时按修改时间从旧到新删除。
@@ -89,8 +103,8 @@ class ArtworkCacheService {
       }
       if (total <= _maxDiskBytes) return;
       final sorted = sizes.entries.toList()
-        ..sort((a, b) => a.value.compareTo(b.value)); // 小文件优先淘汰
-      for (final entry in sorted) {
+        ..sort((a, b) => a.key.lastModifiedSync().compareTo(b.key.lastModifiedSync()));
+      for (final entry in sorted) { // 最旧的先淘汰（LRU）
         if (total <= _maxDiskBytes) break;
         try {
           await entry.key.delete();
