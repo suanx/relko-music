@@ -251,30 +251,73 @@ class _EqualizerPanel extends StatelessWidget {
     final preset = await showModalBottomSheet<AudioEffectPreset>(
       context: context,
       showDragHandle: true,
+      // 预设已有 15 个，双列卡片一行放不下，需要放开高度限制让它可滚动。
+      isScrollControlled: true,
       builder: (sheetContext) {
+        final colorScheme = Theme.of(sheetContext).colorScheme;
+        final presets = PlayerController.equalizerPresets;
+        final selectedName = player.equalizerPresetName;
+        // 曲线的纵轴范围跟随设备实际 EQ 区间，这样卡片预览和实际滑杆
+        // 的观感一致（设备只有 5 段时上限也可能低于 ±12dB）。
+        final min = player.equalizerConfig.minMillibels;
+        final max = player.equalizerConfig.maxMillibels;
+
         return Material(
-          color: Theme.of(sheetContext).colorScheme.surface,
+          color: colorScheme.surface,
           child: SafeArea(
             top: false,
-            child: ListView.separated(
-              shrinkWrap: true,
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-              itemCount: PlayerController.equalizerPresets.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final preset = PlayerController.equalizerPresets[index];
-                return ListTile(
-                  leading: const Icon(Icons.tune_rounded),
-                  title: Text(preset.name),
-                  trailing: player.equalizerPresetName == preset.name
-                      ? Icon(
-                          Icons.check_rounded,
-                          color: Theme.of(context).colorScheme.primary,
-                        )
-                      : null,
-                  onTap: () => Navigator.of(sheetContext).pop(preset),
-                );
-              },
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.72,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                    child: Row(
+                      children: [
+                        Text(
+                          '音效预设',
+                          style: Theme.of(sheetContext).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w900),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${presets.length} 个',
+                          style: Theme.of(sheetContext).textTheme.bodyMedium
+                              ?.copyWith(color: colorScheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: GridView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            mainAxisSpacing: 12,
+                            crossAxisSpacing: 12,
+                            childAspectRatio: 0.86,
+                          ),
+                      itemCount: presets.length,
+                      itemBuilder: (context, index) {
+                        final item = presets[index];
+                        return _PresetCard(
+                          preset: item,
+                          selected: item.name == selectedName,
+                          min: min,
+                          max: max,
+                          colorScheme: colorScheme,
+                          onTap: () =>
+                              Navigator.of(sheetContext).pop(item),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -283,6 +326,181 @@ class _EqualizerPanel extends StatelessWidget {
     if (preset != null) {
       await player.applyEqualizerPreset(preset);
     }
+  }
+}
+
+/// 预设卡片：上半部分是该预设的均衡曲线缩略图，下半部分是名字，
+/// 选中时高亮边框并在右上角打勾。
+class _PresetCard extends StatelessWidget {
+  const _PresetCard({
+    required this.preset,
+    required this.selected,
+    required this.min,
+    required this.max,
+    required this.colorScheme,
+    required this.onTap,
+  });
+
+  final AudioEffectPreset preset;
+  final bool selected;
+  final int min;
+  final int max;
+  final ColorScheme colorScheme;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final borderWidth = selected ? 2.0 : 1.0;
+
+    return Material(
+      color: selected
+          ? colorScheme.primaryContainer.withValues(alpha: .55)
+          : colorScheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: selected
+                  ? colorScheme.primary
+                  : colorScheme.outlineVariant,
+              width: borderWidth,
+            ),
+          ),
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: CustomPaint(
+                        painter: _PresetCurvePainter(
+                          colorScheme: colorScheme,
+                          levels: preset.levels,
+                          min: min,
+                          max: max,
+                          active: selected,
+                        ),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      preset.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: selected
+                            ? colorScheme.primary
+                            : colorScheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (selected)
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: Icon(
+                    Icons.check_circle_rounded,
+                    size: 18,
+                    color: colorScheme.primary,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 预设曲线缩略图：基线 + 填充曲线，和主页面 [ _EqualizerCurvePainter ]
+/// 同一套坐标换算，只是更简化（无网格、无刻度）。
+class _PresetCurvePainter extends CustomPainter {
+  const _PresetCurvePainter({
+    required this.colorScheme,
+    required this.levels,
+    required this.min,
+    required this.max,
+    required this.active,
+  });
+
+  final ColorScheme colorScheme;
+  final List<int> levels;
+  final int min;
+  final int max;
+  final bool active;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final baselinePaint = Paint()
+      ..color = colorScheme.outlineVariant.withValues(alpha: .6)
+      ..strokeWidth = 1;
+
+    final zeroY = _levelToY(0, size.height);
+    canvas.drawLine(Offset(0, zeroY), Offset(size.width, zeroY), baselinePaint);
+
+    if (levels.length < 2) {
+      return;
+    }
+
+    final strokeColor = active ? colorScheme.primary : colorScheme.onSurface;
+    final path = Path();
+    for (var index = 0; index < levels.length; index++) {
+      final x = size.width * index / (levels.length - 1);
+      final y = _levelToY(levels[index], size.height);
+      if (index == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+
+    final fill = Path.from(path)
+      ..lineTo(size.width, zeroY)
+      ..lineTo(0, zeroY)
+      ..close();
+    canvas.drawPath(
+      fill,
+      Paint()
+        ..color = strokeColor.withValues(alpha: active ? .22 : .12)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = strokeColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2
+        ..strokeJoin = StrokeJoin.round
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  double _levelToY(int level, double height) {
+    final span = (max - min).abs();
+    if (span == 0) {
+      return height / 2;
+    }
+    final normalized = ((level - min) / span).clamp(0.0, 1.0);
+    return height * (1 - normalized);
+  }
+
+  @override
+  bool shouldRepaint(covariant _PresetCurvePainter oldDelegate) {
+    return oldDelegate.levels != levels ||
+        oldDelegate.min != min ||
+        oldDelegate.max != max ||
+        oldDelegate.active != active ||
+        oldDelegate.colorScheme != colorScheme;
   }
 }
 
