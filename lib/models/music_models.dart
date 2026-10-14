@@ -808,6 +808,9 @@ class Song {
                 })
             .toList(),
         if (isCloudDrive) 'isCloudDrive': true,
+        // source 必须随缓存持久化：网易云歌曲丢掉该标记回读后会被当作
+        // 酷狗歌曲处理，播放走错分支导致 URL 请求失败。
+        if (source != SongSource.kugou) 'source': source.name,
       };
 
   factory Song.fromCache(Map<String, dynamic> json) {
@@ -831,8 +834,56 @@ class Song {
           .where((artist) => artist.name.isNotEmpty)
           .toList(),
       isCloudDrive: json['isCloudDrive'] == true,
+      source: SongSource.values.asNameMap()[asString(json['source'])] ??
+          SongSource.kugou,
     );
   }
+}
+
+/// 排行榜榜单（对应接口 `/rank/list`）。
+class RankBoard {
+  const RankBoard({
+    required this.id,
+    required this.name,
+    required this.classify,
+    this.coverUrl,
+  });
+
+  final String id;
+  final String name;
+
+  /// 榜单分类：1 星耀榜、2 地区榜、3 特色榜、4 全球榜、5 曲风榜。
+  final int classify;
+  final String? coverUrl;
+
+  factory RankBoard.fromJson(Map<String, dynamic> json) {
+    return RankBoard(
+      id: asString(json['rankid']) ?? '',
+      name: asString(json['rankname']) ?? '未知榜单',
+      classify: asInt(json['classify']) ?? 0,
+      coverUrl: normalizeImageUrl(
+        asString(json['img_9']) ?? asString(json['img_10']),
+      ),
+    );
+  }
+
+  /// 分类的中文名称，用于分组展示。
+  String get classifyLabel => switch (classify) {
+        1 => '星耀榜',
+        2 => '地区榜',
+        3 => '特色榜',
+        4 => '全球榜',
+        5 => '曲风榜',
+        _ => '其它榜单',
+      };
+}
+
+/// 榜单歌曲分页结果（对应接口 `/rank/audio`）。
+class RankSongsPage {
+  const RankSongsPage({required this.total, required this.songs});
+
+  final int total;
+  final List<Song> songs;
 }
 
 class FmStation {

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'config/app_config.dart';
 import 'controllers/auth_controller.dart';
@@ -51,6 +52,17 @@ Future<void> main() async {
     audioHandler: audioHandler,
     themeController: themeController,
   ));
+
+  // Android 13+（API 33）媒体通知需要运行时授权 POST_NOTIFICATIONS，
+  // 否则后台播放的通知栏控件会被系统静默抑制。不阻塞启动流程，
+  // 用户拒绝也不影响播放，只是通知栏不显示。
+  if (Platform.isAndroid) {
+    unawaited(
+      Permission.notification
+          .request()
+          .catchError((_) => PermissionStatus.denied),
+    );
+  }
 }
 
 class KaMusicApp extends StatefulWidget {

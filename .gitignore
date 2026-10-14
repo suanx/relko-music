@@ -48,6 +48,10 @@ app.*.map.json
 *.keystore
 *.jks
 key.properties
+# release 签名密钥：即使改名也拦下。
+# 模板与恢复脚本见 tooling/signing/（不含任何机密，可入库）。
+relko-release.keystore
+android/key.properties
 
 .ace-tool/
 

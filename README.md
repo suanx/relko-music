@@ -334,6 +334,23 @@ lib/
 
 ---
 
+## 🔧 维护文档
+
+改动本项目时请同步维护文档，便于后续排查与交接：
+
+- [docs/工作日志.md](docs/工作日志.md) —— 所有优化的变更记录、验证结果、
+  以及**尚未执行的待办项登记**（含未做原因）。
+- `docs/fixes/` —— 每项修复的独立说明文件，统一结构：
+  问题现象 → 根因 → 改动内容 → 影响文件 → 验证方式 → 回归风险与注意事项。
+- `tooling/signing/` —— **release 签名凭据不入库**，本地构建前需先恢复：
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File tooling\signing\restore-signing.ps1
+  ```
+  CI 所需的 4 个 GitHub Secrets 见
+  [tooling/signing/README.md](tooling/signing/README.md)。
+
+---
+
 ## 📄 许可证
 
 本项目仅供学习交流使用，请勿用于商业用途。

@@ -1,7 +1,10 @@
+import 'dart:io' show File;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import '../../services/artwork_cache_service.dart';
 
 class Artwork extends StatelessWidget {
   const Artwork({
@@ -15,6 +18,20 @@ class Artwork extends StatelessWidget {
   final double size;
   final double borderRadius;
 
+  /// 解码降采样上限（像素）：网络原图多为 480~1000px，列表小图（50~100px）
+  /// 也全尺寸解码会浪费大量内存。按显示尺寸 * devicePixelRatio 取 2 的幂，
+  /// 既省内存又不明显降低画质。
+  int? get _decodeSize {
+    if (!size.isFinite || size <= 0) return null;
+    final target = (size * 3).clamp(64.0, 1024.0).round();
+    // Image 的 cacheWidth/cacheHeight 为 2 的幂时走更优的解码路径。
+    var pow2 = 64;
+    while (pow2 * 2 <= target && pow2 < 1024) {
+      pow2 *= 2;
+    }
+    return pow2;
+  }
+
   @override
   Widget build(BuildContext context) {
     final imageUrl = url;
@@ -26,20 +43,11 @@ class Artwork extends StatelessWidget {
                 size: size,
                 borderRadius: borderRadius,
               )
-            : Image.network(
-                imageUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) =>
-                    _Fallback(size: size),
-                loadingBuilder: (context, child, progress) {
-                  if (progress == null) {
-                    return child;
-                  }
-                  return _ShimmerBox(
-                    size: size,
-                    borderRadius: borderRadius,
-                  );
-                },
+            : _CachedNetworkImage(
+                url: imageUrl,
+                size: size,
+                decodeSize: _decodeSize,
+                borderRadius: borderRadius,
               );
 
     return ClipRRect(
@@ -47,6 +55,75 @@ class Artwork extends StatelessWidget {
       child: size.isFinite
           ? SizedBox.square(dimension: size, child: child)
           : SizedBox.expand(child: child),
+    );
+  }
+}
+
+/// 网络封面：走 [ArtworkCacheService] 两级缓存（磁盘 + Image 内存缓存），
+/// 配合 decodeSize 解码降采样，避免列表滚动重复下载和小图全尺寸解码。
+class _CachedNetworkImage extends StatefulWidget {
+  const _CachedNetworkImage({
+    required this.url,
+    required this.size,
+    required this.decodeSize,
+    required this.borderRadius,
+  });
+
+  final String url;
+  final double size;
+  final int? decodeSize;
+  final double borderRadius;
+
+  @override
+  State<_CachedNetworkImage> createState() => _CachedNetworkImageState();
+}
+
+class _CachedNetworkImageState extends State<_CachedNetworkImage> {
+  File? _file;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CachedNetworkImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 列表复用 State 时 url 变化需重新加载，避免封面错位。
+    if (oldWidget.url != widget.url) {
+      _file = null;
+      _loading = true;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final url = widget.url;
+    final file = await ArtworkCacheService.instance.fetch(url);
+    if (!mounted || url != widget.url) return;
+    setState(() {
+      _file = file;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return _ShimmerBox(size: widget.size, borderRadius: widget.borderRadius);
+    }
+    final file = _file;
+    if (file == null) {
+      return _Fallback(size: widget.size);
+    }
+    return Image.file(
+      file,
+      fit: BoxFit.cover,
+      cacheWidth: widget.decodeSize,
+      cacheHeight: widget.decodeSize,
+      errorBuilder: (context, error, stackTrace) => _Fallback(size: widget.size),
     );
   }
 }

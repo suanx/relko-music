@@ -234,18 +234,45 @@ class DownloadService {
         headers[HttpHeaders.rangeHeader] = 'bytes=$startOffset-';
       }
 
-      await _dio.download(
+      // 手动流式下载而非 dio.download：需要拿到响应状态码来区分
+      // “206 续传”和“服务器忽略 Range 头返回 200 全量”两种情况，
+      // 后者必须重置 .part 从头写入，否则文件会拼接损坏、进度算超 100%。
+      final response = await _dio.get<ResponseBody>(
         task.url,
-        partPath,
-        onReceiveProgress: (received, total) {
-          final actualTotal = startOffset + total;
-          final actualReceived = startOffset + received;
-          task.onProgress?.call(actualReceived, actualTotal);
-        },
-        options: Options(headers: headers),
         cancelToken: cancelToken,
-        deleteOnError: false,
+        options: Options(
+          headers: headers,
+          responseType: ResponseType.stream,
+          validateStatus: (status) => status == 200 || status == 206,
+        ),
       );
+
+      final resumed = response.statusCode == 206;
+      if (startOffset > 0 && !resumed) {
+        // 服务器不支持 Range：清空旧分片，从 0 开始写入。
+        startOffset = 0;
+        await partFile.writeAsBytes(const <int>[], flush: true);
+      }
+
+      final contentLengthHeader =
+          response.headers.value(Headers.contentLengthHeader);
+      final contentLength = int.tryParse(contentLengthHeader ?? '') ?? -1;
+      final actualTotal = contentLength >= 0
+          ? (resumed ? startOffset + contentLength : contentLength)
+          : -1;
+
+      var received = startOffset;
+      final sink = partFile.openWrite(mode: FileMode.append);
+      try {
+        await for (final chunk in response.data!.stream) {
+          sink.add(chunk);
+          received += chunk.length;
+          task.onProgress?.call(received, actualTotal);
+        }
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
 
       // 下载完成，重命名 .part 为最终文件
       if (partFile.existsSync()) {

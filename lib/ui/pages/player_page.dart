@@ -127,12 +127,29 @@ class _PlayerPageState extends State<PlayerPage> {
         return AnimatedBuilder(
           animation: widget.player,
           builder: (context, _) {
-            return ListView.builder(
-              itemCount: widget.player.queue.length,
+            final player = widget.player;
+            if (player.queue.isEmpty) {
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 32),
+                child: Center(child: Text('播放队列为空')),
+              );
+            }
+            return ReorderableListView.builder(
+              itemCount: player.queue.length,
+              // onReorderItem 会自动校正「移除旧位置后」的 newIndex，
+              // 与 PlayerController.reorderQueue 的 remove+insert 语义一致。
+              onReorderItem: player.reorderQueue,
+              proxyDecorator: (child, _, animation) => Material(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                elevation: 6,
+                borderRadius: BorderRadius.circular(12),
+                child: child,
+              ),
               itemBuilder: (context, index) {
-                final song = widget.player.queue[index];
-                final active = widget.player.currentSong?.hash == song.hash;
+                final song = player.queue[index];
+                final active = player.currentSong?.hash == song.hash;
                 return ListTile(
+                  key: ValueKey('${song.hash}_$index'),
                   selected: active,
                   leading: Artwork(url: song.coverUrl, size: 44),
                   title: active
@@ -152,9 +169,29 @@ class _PlayerPageState extends State<PlayerPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  trailing: active
+                      // 当前播放歌曲不提供删除/拖拽（由切歌逻辑接管）
+                      ? null
+                      : Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: '从队列移除',
+                              icon: const Icon(Icons.close_rounded, size: 20),
+                              onPressed: () => player.removeFromQueue(index),
+                            ),
+                            ReorderableDragStartListener(
+                              index: index,
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 6),
+                                child: Icon(Icons.drag_handle_rounded, size: 22),
+                              ),
+                            ),
+                          ],
+                        ),
                   onTap: () {
                     Navigator.of(context).pop();
-                    widget.player.playSong(song, queue: widget.player.queue);
+                    player.playSong(song, queue: player.queue);
                   },
                 );
               },
@@ -742,11 +779,30 @@ class _LandscapeHeader extends StatelessWidget {
         SongSheetAction(
           icon: Icons.bedtime_rounded,
           title: '定时播放',
-          subtitle: player.isSleepTimerActive
-              ? '剩余 ${_formatSleepRemaining(player.sleepTimerRemaining)}'
-              : player.isSleepFinishCurrentSong
-                  ? '播完歌曲后停止'
-                  : null,
+          // 倒计时走独立 ValueNotifier：仅这一行文本每秒刷新，
+          // 不再触发整个操作面板/播放页每秒重建。
+          subtitleWidget: ValueListenableBuilder<Duration?>(
+            valueListenable: player.sleepTimerNotifier,
+            builder: (context, remaining, _) {
+              if (player.isSleepTimerActive && remaining != null) {
+                return Text(
+                  '剩余 ${_formatSleepRemaining(remaining)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                );
+              }
+              if (player.isSleepFinishCurrentSong) {
+                return Text(
+                  '播完歌曲后停止',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
           onTap: () => showSleepTimerSheet(context: context, player: player),
         ),
         if (player.isDesktopLyricsSupported) ...[

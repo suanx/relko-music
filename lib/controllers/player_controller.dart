@@ -125,6 +125,26 @@ class PlayerController extends ChangeNotifier {
       name: '蝰蛇音效',
       levels: [700, 600, 350, 50, -100, -50, 100, 250, 400, 550],
     ),
+    // 以下两个参考 DTS 音效的听感目标，用系统均衡器近似实现。
+    // 注意：厂商音效是芯片级 DSP（多段动态 EQ + 空间音频），系统
+    // Equalizer 只有 10 段静态增益，这里做的是「听感方向」对齐，
+    // 不是算法复刻。
+    //
+    // 浩渺声场（DTS「音符在辽阔声场中自由跳动」）：深而克制的超低频
+    // 打底 + 中频凹陷制造纵深 + 高频大幅延展做出空气感，是四个预设里
+    // 「空间感」最强的一个。
+    AudioEffectPreset(
+      name: '浩渺声场',
+      levels: [600, 500, 250, 0, -200, -250, -100, 200, 450, 550],
+    ),
+    // 悦耳人声（DTS「高保真人声」）：削掉超低频和浑浊的中低频，把
+    // 增益集中在 1~4kHz 的基频与临场感区间，齿音控制在 8kHz 以内。
+    // 与已有的「人声」预设区别：后者偏大幅度染色，这里幅度更克制、
+    // 更适合长时间聆听。
+    AudioEffectPreset(
+      name: '悦耳人声',
+      levels: [-150, -100, -50, 150, 250, 450, 500, 350, 200, 100],
+    ),
   ];
 
   /// 下载控制器（由 main.dart 在创建后注入，供 UI 访问下载功能）。
@@ -272,6 +292,23 @@ class PlayerController extends ChangeNotifier {
   bool isBuffering = false;
   bool isPreparing = false;
   bool _isChangingSource = false;
+
+  /// 连续播放失败次数（用于自动跳下一首）。
+  int _consecutiveFailures = 0;
+
+  /// 播放地址短期缓存：key = "hash_quality"。
+  ///
+  /// 播放地址接口每次都要走网络，而用户经常「上一首/下一首」来回切歌或
+  /// 单曲外重播同一首，导致对同一地址反复请求。缓存短 TTL 的 URL 可显著
+  /// 减少请求与切歌等待。URL 本身通常带鉴权且有效期远大于 5 分钟。
+  final Map<String, _CachedPlayUrl> _playUrlCache = {};
+
+  /// 播放地址缓存有效期与容量上限。
+  static const _playUrlCacheTtl = Duration(minutes: 5);
+  static const _playUrlCacheMaxEntries = 50;
+
+  /// 自动跳下一首的最大连续失败次数，避免整队列都不可播时无限跳。
+  static const _maxAutoSkipFailures = 3;
   bool addListeningTimeEnabled = true;
   bool keepScreenOnEnabled = false;
   bool lyricBlurEnabled = false;
@@ -509,6 +546,8 @@ class PlayerController extends ChangeNotifier {
       notifyListeners();
       unawaited(loadLyrics(song));
       await _audioHandler.play();
+      // 播放成功：重置连续失败计数
+      _consecutiveFailures = 0;
       // 记录播放历史与本地播放统计（后台执行，不阻塞播放）
       unawaited(_historyService.record(song));
       unawaited(_statsService.recordPlay(song));
@@ -519,9 +558,19 @@ class PlayerController extends ChangeNotifier {
         );
       }
     } catch (error) {
+      // 播放失败（无播放地址、解码失败、网络中断等）：连续失败时自动跳下一首，
+      // 避免用户必须手动点 next。超过上限后停止并显示错误。
+      _consecutiveFailures++;
       errorMessage = error.toString();
       isPreparing = false;
       notifyListeners();
+      final canSkip = _consecutiveFailures < _maxAutoSkipFailures &&
+          (_nextSong() != null);
+      if (canSkip) {
+        unawaited(Future<void>.delayed(const Duration(milliseconds: 600), () {
+          return next();
+        }));
+      }
     } finally {
       _isChangingSource = false;
       if (isPreparing) {
@@ -603,6 +652,15 @@ class PlayerController extends ChangeNotifier {
       );
     }
 
+    final cacheKey = '${song.hash}_${audioQuality.name}';
+    final cached = _playUrlCache[cacheKey];
+    if (cached != null) {
+      if (DateTime.now().difference(cached.cachedAt) < _playUrlCacheTtl) {
+        return PlayUrl(url: cached.url, hash: song.hash);
+      }
+      _playUrlCache.remove(cacheKey);
+    }
+
     try {
       final playUrl = await _api.songUrl(
         song,
@@ -610,6 +668,7 @@ class PlayerController extends ChangeNotifier {
         hashOnly: _isPersonalFmActive,
       );
       if (playUrl.url.isNotEmpty || !smartQualityEnabled) {
+        _storePlayUrl(cacheKey, playUrl.url);
         return playUrl;
       }
       // 返回空地址：按智能音质策略降级重试
@@ -636,6 +695,8 @@ class PlayerController extends ChangeNotifier {
             '[REIKO][smart-quality] ${audioQuality.badge} 失败，'
             '已降级为 ${fallback.badge}',
           );
+          // 降级得到的地址按降级音质缓存，避免下次又请求高音质再失败。
+          _storePlayUrl('${song.hash}_${fallback.name}', retryUrl.url);
           return retryUrl;
         }
       } catch (_) {
@@ -694,6 +755,43 @@ class PlayerController extends ChangeNotifier {
     _saveQueueState();
     notifyListeners();
     return true;
+  }
+
+  /// 从队列中移除指定歌曲（按索引）。当前播放歌曲不可被移除。
+  Future<void> removeFromQueue(int index) async {
+    if (index < 0 || index >= queue.length) return;
+    if (index == currentIndex) return; // 正在播放的歌曲由切歌逻辑接管
+    final nextQueue = List<Song>.of(queue)..removeAt(index);
+    queue = nextQueue;
+    await _audioHandler.setSongQueue(
+      queueSongs: queue,
+      queueIndex: currentIndex,
+      currentSong: currentSong,
+    );
+    _saveQueueState();
+    notifyListeners();
+  }
+
+  /// 队列拖拽排序：把 [oldIndex] 处的歌曲移动到 [newIndex]。
+  Future<void> reorderQueue(int oldIndex, int newIndex) async {
+    if (oldIndex < 0 ||
+        oldIndex >= queue.length ||
+        newIndex < 0 ||
+        newIndex >= queue.length ||
+        oldIndex == newIndex) {
+      return;
+    }
+    final nextQueue = List<Song>.of(queue);
+    final song = nextQueue.removeAt(oldIndex);
+    nextQueue.insert(newIndex, song);
+    queue = nextQueue;
+    await _audioHandler.setSongQueue(
+      queueSongs: queue,
+      queueIndex: currentIndex,
+      currentSong: currentSong,
+    );
+    _saveQueueState();
+    notifyListeners();
   }
 
   Future<void> setAudioQuality(
@@ -1776,6 +1874,15 @@ class PlayerController extends ChangeNotifier {
   bool get isSleepTimerActive =>
       sleepTimerRemaining != null && sleepTimerRemaining! > Duration.zero;
 
+  /// 睡眠定时器倒计时专用通知器。
+  ///
+  /// 倒计时每秒刷新一次，若走 notifyListeners() 会导致所有订阅
+  /// PlayerController 的组件（包括整个 AppShell）每秒全量重建，
+  /// 仅为一行动态文本。此处用独立 ValueNotifier 让仅展示倒计时的
+  /// UI（ValueListenableBuilder）单独更新，不触发全 app 重建。
+  final ValueNotifier<Duration?> sleepTimerNotifier =
+      ValueNotifier<Duration?>(null);
+
   bool get isSleepFinishCurrentSong => _sleepFinishCurrentSong;
   bool get sleepFinishCurrentSongOption => _sleepFinishCurrentSongOption;
 
@@ -1786,6 +1893,7 @@ class PlayerController extends ChangeNotifier {
     _sleepTimer?.cancel();
     _sleepTimerEnd = DateTime.now().add(duration);
     sleepTimerRemaining = duration;
+    sleepTimerNotifier.value = duration;
     notifyListeners();
 
     _sleepTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -1804,7 +1912,8 @@ class PlayerController extends ChangeNotifier {
         }
       } else {
         sleepTimerRemaining = remaining;
-        notifyListeners();
+        // 每秒只更新倒计时通知器，不触发全 app 重建。
+        sleepTimerNotifier.value = remaining;
       }
     });
   }
@@ -1835,6 +1944,7 @@ class PlayerController extends ChangeNotifier {
     _sleepFinishCurrentSong = false;
     _sleepFinishCurrentSongOption = false;
     sleepTimerRemaining = null;
+    sleepTimerNotifier.value = null;
     notifyListeners();
   }
 
@@ -1845,11 +1955,26 @@ class PlayerController extends ChangeNotifier {
     _sleepFinishCurrentSong = false;
     _sleepFinishCurrentSongOption = false;
     sleepTimerRemaining = null;
+    sleepTimerNotifier.value = null;
     notifyListeners();
     unawaited(_audioHandler.pause());
   }
 
   Future<void> _restoreSettings() async {
+    try {
+      await _restoreSettingsUnsafe();
+    } catch (e, s) {
+      // 设置恢复失败绝不能卡死启动：_settingsRestored 的等待方
+      // （main.dart 的启动流程）会永远挂起。失败时保留默认值继续运行。
+      debugPrint('恢复播放器设置失败（使用默认值启动）: $e\n$s');
+    } finally {
+      if (!_settingsRestored.isCompleted) {
+        _settingsRestored.complete();
+      }
+    }
+  }
+
+  Future<void> _restoreSettingsUnsafe() async {
     final prefs = await SharedPreferences.getInstance();
     addListeningTimeEnabled =
         prefs.getBool(_listenTimeSettingKey) ?? addListeningTimeEnabled;
@@ -2241,6 +2366,7 @@ class PlayerController extends ChangeNotifier {
     unawaited(_audioHandler.close());
     unawaited(_desktopLyrics.hide());
     positionNotifier.dispose();
+    sleepTimerNotifier.dispose();
     super.dispose();
   }
 
@@ -2461,4 +2587,22 @@ class PlayerController extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// 写入播放地址缓存。容量超限时淘汰最早的条目（简单 LRU）。
+  void _storePlayUrl(String key, String url) {
+    if (url.isEmpty) return;
+    _playUrlCache[key] = _CachedPlayUrl(url, DateTime.now());
+    if (_playUrlCache.length > _playUrlCacheMaxEntries) {
+      final oldest = _playUrlCache.keys.first;
+      _playUrlCache.remove(oldest);
+    }
+  }
+}
+
+/// 播放地址缓存条目。
+class _CachedPlayUrl {
+  const _CachedPlayUrl(this.url, this.cachedAt);
+
+  final String url;
+  final DateTime cachedAt;
 }

@@ -1074,6 +1074,44 @@ class MusicApi {
         asString(value['accessKey']) != null;
     return hasId && hasAccessKey ? value : null;
   }
+
+  /// 排行榜列表（榜单目录）。
+  ///
+  /// 对应接口 `/rank/list`，返回各榜单（星耀榜/地区榜/特色榜/全球榜/曲风榜）
+  /// 的 id、名称与封面。
+  Future<List<RankBoard>> rankList() async {
+    final json = asMap(await _client.get('/rank/list'));
+    return asList(json['info'])
+        .whereType<Map<String, dynamic>>()
+        .map(RankBoard.fromJson)
+        .where((board) => board.id.isNotEmpty)
+        .toList();
+  }
+
+  /// 某个榜单的歌曲列表（分页）。
+  ///
+  /// 对应接口 `/rank/audio`，返回 [RankSongsPage]（含总条数用于分页判断）。
+  Future<RankSongsPage> rankSongs(
+    String rankId, {
+    int page = 1,
+    int pageSize = 30,
+  }) async {
+    final json = asMap(
+      await _client.get(
+        '/rank/audio',
+        {'rankid': rankId, 'page': page, 'pagesize': pageSize},
+      ),
+    );
+    final songs = asList(json['songlist'])
+        .whereType<Map<String, dynamic>>()
+        .map(Song.fromArtistAudio)
+        .where((song) => song.hash.isNotEmpty || song.albumAudioId != null)
+        .toList();
+    return RankSongsPage(
+      total: asInt(json['total']) ?? songs.length,
+      songs: songs,
+    );
+  }
 }
 
 List<PlaylistSummary> _orderUserPlaylistsForDisplay(

@@ -112,15 +112,39 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # 签名配置：密钥库 relko-release.keystore 随仓库提交，
-      # 这里按构建时生成 android/key.properties（该文件不入库）。
-      - name: Write signing config (key.properties)
+      # 签名配置：密钥库与口令**不入库**，全部从 GitHub Secrets 读取
+      # （GitHub 对 secret 值静态加密，界面上不回显，也不会进 git 历史）。
+      # 需要配置 4 个 Repository Secrets：
+      #   ANDROID_KEYSTORE_BASE64   —— keystore 文件的 base64（单行，无换行）
+      #   ANDROID_KEYSTORE_PASSWORD —— keystore 口令
+      #   ANDROID_KEY_ALIAS         —— 密钥别名
+      #   ANDROID_KEY_PASSWORD      —— 密钥口令
+      # 本地开发请用 tooling/signing/restore-signing.ps1 恢复签名，
+      # 详见 tooling/signing/README.md。
+      - name: Write signing config (from GitHub Secrets)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          cat > android/key.properties <<'EOF'
+          set -euo pipefail
+          missing=0
+          for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then echo "::error::缺少 Repository Secret: $v"; missing=1; fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::签名 secrets 未配置，终止发布（不会产出 debug 签名的包）"
+            exit 1
+          fi
+          # 解码 keystore 到 CI 工作目录（任务结束即销毁，不上传为产物）
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > relko-release.keystore
+          chmod 600 relko-release.keystore
+          cat > android/key.properties <<EOF
           storeFile=../relko-release.keystore
-          storePassword=relko2026sign
-          keyAlias=relko
-          keyPassword=relko2026sign
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
           EOF
 
       # --build-name / --build-number 覆盖 pubspec 版本：

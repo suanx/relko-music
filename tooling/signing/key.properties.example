@@ -1,0 +1,16 @@
+# android/key.properties 模板
+#
+# 本文件是**模板**，不含任何真实凭据，可安全入库。
+# 复制为 android/key.properties 后填入真实值；android/key.properties
+# 已被 .gitignore 忽略，不会进仓库。
+#
+# 生成方式见 tooling/signing/README.md（restore-signing.ps1 会自动生成）。
+
+# keystore 文件路径，相对 android/ 目录。
+# 默认使用仓库工作副本：../relko-release.keystore
+storeFile=../relko-release.keystore
+
+# 以下三项是机密，切勿提交。
+storePassword=
+keyAlias=
+keyPassword=

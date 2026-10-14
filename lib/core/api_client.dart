@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -47,6 +48,9 @@ class ApiClient {
         headers: _headers,
         body: body == null ? null : jsonEncode(body),
       ),
+      // POST 多为非幂等操作（发验证码、加歌等），失败重试可能造成重复提交，
+      // 因此不在网络错误/5xx 时自动重试，由调用方决定是否重试。
+      allowRetry: false,
     );
   }
 
@@ -70,37 +74,51 @@ class ApiClient {
     return headers;
   }
 
-  /// 带自动重试的请求发送。
+  /// 单个请求的超时时间。超时视为可重试的网络故障。
+  static const _requestTimeout = Duration(seconds: 15);
+
+  /// 带超时与自动重试的请求发送。
   ///
-  /// 对连接超时、5xx 服务器错误自动重试，指数退避（500ms、1s）。
+  /// 对连接超时、请求超时、5xx 服务器错误自动重试，指数退避（500ms、1s）。
   /// 其他错误（如 4xx、格式异常）不重试，直接抛出。
+  /// [allowRetry] 为 false 时（非幂等 POST）任何错误都不重试。
   Future<dynamic> _sendWithRetry(
     Future<http.Response> Function() request, {
     int maxRetries = 2,
+    bool allowRetry = true,
   }) async {
-    for (var attempt = 0; attempt <= maxRetries; attempt++) {
+    final attempts = allowRetry ? maxRetries : 0;
+    for (var attempt = 0; attempt <= attempts; attempt++) {
       try {
-        final response = await request();
+        // http 包没有内置超时：挂起的连接会无限等待，重试逻辑也永远不会触发。
+        final response = await request().timeout(_requestTimeout);
         // 5xx 服务器错误可重试
-        if (response.statusCode >= 500 && attempt < maxRetries) {
+        if (response.statusCode >= 500 && attempt < attempts) {
           await Future.delayed(Duration(milliseconds: 500 * (1 << attempt)));
           continue;
         }
-        return _processResponse(response);
+        return await _processResponse(response);
       } on http.ClientException {
-        // 网络连接异常（连接超时、断网等），重试
-        if (attempt < maxRetries) {
+        // 网络连接异常（连接失败、断网等），重试
+        if (attempt < attempts) {
           await Future.delayed(Duration(milliseconds: 500 * (1 << attempt)));
           continue;
         }
         rethrow;
+      } on TimeoutException {
+        // 请求超时（服务器挂起/网络极慢），重试
+        if (attempt < attempts) {
+          await Future.delayed(Duration(milliseconds: 500 * (1 << attempt)));
+          continue;
+        }
+        throw ApiException('请求超时（>${_requestTimeout.inSeconds}s）');
       } on FormatException {
         // 非 5xx 的格式异常不重试
         rethrow;
       }
     }
     // 理论上不会到达这里，但为了保证编译器认为有返回值
-    throw ApiException('请求失败，已重试 $maxRetries 次');
+    throw ApiException('请求失败，已重试 $attempts 次');
   }
 
   /// 处理响应：更新 sessionId、校验状态码、解码 JSON。

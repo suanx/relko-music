@@ -20,6 +20,7 @@ import '../widgets/scroll_to_top_button.dart';
 import '../adaptive_layout.dart';
 import 'artist_detail_page.dart';
 import 'playlist_detail_page.dart';
+import 'rank_page.dart';
 import 'dart:math' as math;
 
 class SearchPage extends StatefulWidget {
@@ -501,6 +502,21 @@ class _SearchPageState extends State<SearchPage> {
             ),
           ),
           actions: [
+            IconButton(
+              tooltip: '排行榜',
+              icon: const Icon(Icons.leaderboard_rounded),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => RankPage(
+                      api: widget.api,
+                      auth: widget.auth,
+                      player: widget.player,
+                    ),
+                  ),
+                );
+              },
+            ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
               child: Text(

@@ -25,6 +25,7 @@ dependencies:
   lpinyin: ^2.0.3
   liquid_glass_easy: ^4.2.0
   package_info_plus: ^10.2.1
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:

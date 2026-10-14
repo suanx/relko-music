@@ -163,11 +163,23 @@ class _ActiveTimerDisplay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 倒计时每秒只更新 sleepTimerNotifier，刷新范围限于本组件（不再每秒
+    // 重建整个 AppShell）；合并 player 是为了「播完歌曲再停止」开关切换
+    // 等低频状态变化时也能重绘。
+    return AnimatedBuilder(
+      animation: Listenable.merge([player.sleepTimerNotifier, player]),
+      builder: (context, _) {
+        return _buildDisplay(context, player.sleepTimerRemaining);
+      },
+    );
+  }
+
+  Widget _buildDisplay(BuildContext context, Duration? remaining) {
     final colorScheme = Theme.of(context).colorScheme;
-    final remaining = player.sleepTimerRemaining;
+    final isFinishSong = player.isSleepFinishCurrentSong;
 
     String text;
-    if (player.isSleepFinishCurrentSong) {
+    if (isFinishSong) {
       if (remaining != null && remaining > Duration.zero) {
         final m = remaining.inMinutes;
         final s = remaining.inSeconds.remainder(60);

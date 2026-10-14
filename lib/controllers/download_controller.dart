@@ -104,6 +104,9 @@ class DownloadController extends ChangeNotifier {
   static const _playCacheIndexKey = 'ka_music_play_cache_index';
   static const _playCacheLimitKey = 'settings.play_cache_limit';
 
+  /// 下载进度通知节流间隔（毫秒）。
+  static const _progressThrottleMs = 150;
+
   final Map<String, DownloadEntry> _downloads = {}; // key = hash
   final Map<String, PlayCacheEntry> _playCache = {}; // key = hash_quality
   bool _initialized = false;
@@ -378,6 +381,10 @@ class DownloadController extends ChangeNotifier {
   /// 文件传输（播放地址已解析）。成功后写入已下载索引，失败进入失败列表。
   Future<void> _transfer(Song song, AudioQuality quality, String url) async {
     final hash = song.hash;
+    // 进度节流：dio 的 onProgress 每 chunk 触发（可达每秒数十次），
+    // 每次都会 notifyListeners 让所有订阅下载状态的 UI 重建。
+    // 限制为最多每 150ms 通知一次，进度条肉眼无感但显著降低重建开销。
+    var lastNotifyAt = DateTime.fromMillisecondsSinceEpoch(0);
     try {
       final path = await _service.download(
         song: song,
@@ -386,10 +393,14 @@ class DownloadController extends ChangeNotifier {
         onProgress: (received, total) {
           final progress = total > 0 ? received / total : 0.0;
           final entry = _downloads[hash];
-          if (entry?.status == DownloadStatus.downloading) {
-            _downloads[hash] = entry!.copyWith(progress: progress);
-            notifyListeners();
+          if (entry?.status != DownloadStatus.downloading) return;
+          final now = DateTime.now();
+          if (now.difference(lastNotifyAt).inMilliseconds < _progressThrottleMs) {
+            return;
           }
+          lastNotifyAt = now;
+          _downloads[hash] = entry!.copyWith(progress: progress);
+          notifyListeners();
         },
       );
       _downloads[hash] = DownloadEntry(
