@@ -1,5 +1,4 @@
 import 'dart:io' show File;
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -216,41 +215,41 @@ class _Fallback extends StatelessWidget {
   /// 容器边长；无限大（整页填充）时按固定尺寸渲染。
   final double size;
 
-  /// 无封面歌曲的默认占位图（App 吉祥物，带透明背景）。
+  /// 无封面歌曲的默认占位图（透明背景 PNG）。
   static const _defaultCoverAsset = 'lib/assets/default_cover.png';
 
   @override
   Widget build(BuildContext context) {
-    // 吉祥物统一占背景边长的 70%；全幅场景（size 无限大）用 LayoutBuilder
+    // 占位图统一占背景边长的 70%；全幅场景（size 无限大）用 LayoutBuilder
     // 拿真实约束尺寸计算，所有调用点（播放页、专辑网格等）自动适配。
     Widget buildBody(double imageExtent) {
+      final colorScheme = Theme.of(context).colorScheme;
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      // 底色跟随主题渐变色（primaryContainer → tertiaryContainer），让透明
+      // 占位图在浅色/深色下都有足够对比。此前这里是固定的暖黄/浅蓝渐变 +
+      // 一层 sigma=60 的高斯模糊光晕：模糊是静态效果却要在每个列表项上实时
+      // 计算，滚动时开销被放大 N 倍，现改为纯渐变，视觉几乎无差异。
       return DecoratedBox(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              Color(0xFFFFE9A8),
-              Color(0xFFFFF6DC),
-              Color(0xFFBFE0FA),
+              colorScheme.primaryContainer,
+              isDark
+                  ? colorScheme.surfaceContainerHighest
+                  : colorScheme.tertiaryContainer,
             ],
           ),
         ),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // 暖黄与浅蓝弥散光斑，整体高斯模糊 60 营造朦胧眩晕感
-            const _GlassSheen(),
-            Center(
-              child: Image.asset(
-                _defaultCoverAsset,
-                width: imageExtent,
-                height: imageExtent,
-                fit: BoxFit.contain,
-                filterQuality: FilterQuality.medium,
-              ),
-            ),
-          ],
+        child: Center(
+          child: Image.asset(
+            _defaultCoverAsset,
+            width: imageExtent,
+            height: imageExtent,
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.medium,
+          ),
         ),
       );
     }
@@ -263,57 +262,6 @@ class _Fallback extends StatelessWidget {
         final side = constraints.biggest.shortestSide;
         return buildBody((side * 0.70).clamp(96.0, 600.0));
       },
-    );
-  }
-}
-
-/// 背景弥散光斑层：暖黄与浅蓝交错光晕，整体高斯模糊（sigma 60），
-/// 形成柔和的朦胧眩晕感。纯装饰性叠层，不参与命中测试。
-class _GlassSheen extends StatelessWidget {
-  const _GlassSheen();
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: ImageFiltered(
-        imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
-        child: const Stack(
-          fit: StackFit.expand,
-          children: [
-            // 左上暖黄光晕
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: Alignment(-0.55, -0.6),
-                  radius: 0.9,
-                  colors: [Color(0xC8FFD166), Color(0x00FFD166)],
-                ),
-              ),
-            ),
-            // 右下浅蓝光晕
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: Alignment(0.65, 0.7),
-                  radius: 1.0,
-                  colors: [Color(0xC88FCBFF), Color(0x008FCBFF)],
-                ),
-              ),
-            ),
-            // 中部穿插的浅蓝斜向流光，增强渐变交融的眩晕感
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topRight,
-                  end: Alignment.bottomLeft,
-                  colors: [Color(0x66A8D8FF), Color(0x00A8D8FF), Color(0x59FFE28A)],
-                  stops: [0, 0.5, 1],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
